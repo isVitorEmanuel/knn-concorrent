@@ -1,5 +1,7 @@
 package serial;
 
+import classes.Neighbor;
+
 import java.util.ArrayList;
 
 /**
