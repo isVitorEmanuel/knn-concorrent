@@ -2,7 +2,7 @@ target
 /target
 target/
 
-.idea
+.idea/
 
 dataset_high_dim.csv
 
