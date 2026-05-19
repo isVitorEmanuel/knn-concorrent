@@ -1,4 +1,4 @@
-package virtual;
+package hibrid;
 
 import classes.Neighbor;
 
@@ -8,7 +8,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class KNNParallel {
+public class KNNHibrid {
 
     private static final int NUM_PLATFORM_THREADS =
             Math.max(2, Runtime.getRuntime().availableProcessors());
