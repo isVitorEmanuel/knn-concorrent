@@ -16,7 +16,7 @@ import java.util.Locale;
 public class DataSetGenerator {
 
     /** @brief Number of feature columns per data point. Must match RunSerial.NUM_FEATURES. */
-    public static final int NUM_FEATURES = 100;
+    public static final int NUM_FEATURES = 5;
 
     public static void main(String[] args) {
         Locale.setDefault(Locale.US);
