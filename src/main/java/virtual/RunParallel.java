@@ -1,6 +1,7 @@
 package virtual;
 
 import classes.Neighbor;
+import generator.DataSetGenerator;
 
 import java.util.ArrayList;
 
