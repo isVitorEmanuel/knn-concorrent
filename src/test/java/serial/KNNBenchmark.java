@@ -9,8 +9,8 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
-@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 50, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(0)
 public class KNNBenchmark {
 
@@ -37,7 +37,6 @@ public class KNNBenchmark {
         return knn.predictStream(path, target, k);
     }
 
-    // Método main para facilitar a execução via Maven
     public static void main(String[] args) throws Exception {
         org.openjdk.jmh.Main.main(args);
     }
