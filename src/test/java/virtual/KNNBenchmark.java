@@ -1,9 +1,8 @@
-package serial;
+package virtual;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
 import org.openjdk.jmh.annotations.*;
-import virtual.KNNVirtual;
 
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
