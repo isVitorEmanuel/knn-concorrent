@@ -6,13 +6,6 @@ import org.openjdk.jmh.annotations.*;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Configurações do Benchmark:
- * - AverageTime: Mede o tempo médio de cada execução.
- * - Warmup: Roda 3 iterações "falsas" apenas para aquecer a JVM (não entram na média).
- * - Measurement: Roda 5 iterações reais que contarão para o resultado final.
- * - Fork: Roda tudo em 1 processo isolado da JVM.
- */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
@@ -26,7 +19,6 @@ public class KNNBenchmark {
     private String path;
     private int k;
 
-    // O @Setup roda UMA VEZ antes de começar as iterações do benchmark
     @Setup(Level.Trial)
     public void setUp() {
         path = "dataset_high_dim.csv";
@@ -40,7 +32,6 @@ public class KNNBenchmark {
         target = new Neighbor(targetValues, "Unknown");
     }
 
-    // O @Benchmark é o método que será testado repetidas vezes
     @Benchmark
     public String testSerialPrediction() {
         return knn.predictStream(path, target, k);
