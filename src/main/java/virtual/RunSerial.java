@@ -29,7 +29,7 @@ public class RunSerial {
         }
         Neighbor target = new Neighbor(targetValues, "Unknown");
 
-        KNNSerial knn = new KNNSerial();
+        KNNParallel knn = new KNNParallel();
         int k = 21;
 
         System.out.println(">>> starting prediction...");
