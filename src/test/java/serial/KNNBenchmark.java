@@ -3,6 +3,8 @@ package serial;
 import classes.Neighbor;
 import generator.DataSetGenerator;
 import org.openjdk.jmh.annotations.*;
+import virtual.KNNVirtual;
+
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
@@ -14,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(0)
 public class KNNBenchmark {
 
-    private KNNSerial knn;
+    private KNNVirtual knn;
     private Neighbor target;
     private String path;
     private int k;
@@ -23,7 +25,7 @@ public class KNNBenchmark {
     public void setUp() {
         path = "dataset_high_dim.csv";
         k = 21;
-        knn = new KNNSerial();
+        knn = new KNNVirtual();
 
         ArrayList<Double> targetValues = new ArrayList<>();
         for (int i = 0; i < DataSetGenerator.NUM_FEATURES; i++) {
