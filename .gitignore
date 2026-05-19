@@ -2,6 +2,7 @@ target
 /target
 target/
 
+.idea
 
 dataset_high_dim.csv
 
