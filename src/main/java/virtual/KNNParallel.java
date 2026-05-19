@@ -9,8 +9,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class KNNParallel {
 
-    private static final int NUM_PLATFORM_THREADS =
-            Math.max(2, Runtime.getRuntime().availableProcessors());
+    private static final int NUM_VIRTUAL_THREADS =
+            Math.max(2, Runtime.getRuntime().availableProcessors() * 3);
 
     private record DistanceRecord(Neighbor neighbor, double distance) implements Comparable<DistanceRecord> {
         @Override
@@ -22,10 +22,8 @@ public class KNNParallel {
     private record ChunkBounds(long startByte, long endByte) {}
 
     public String predictStream(String filePath, Neighbor target, int k) {
-        System.out.printf("[Platform] Using %d platform threads%n", NUM_PLATFORM_THREADS);
-
         AtomicLong processedLines = new AtomicLong(0);
-        String result = runParallel(filePath, target, k, NUM_PLATFORM_THREADS, processedLines);
+        String result = runParallel(filePath, target, k, NUM_VIRTUAL_THREADS, processedLines);
 
         System.out.printf(">>> Total lines processed (Platform): %d%n", processedLines.get());
         return result;
@@ -44,7 +42,7 @@ public class KNNParallel {
             return "Unknown";
         }
 
-        Thread.Builder builder = Thread.ofPlatform().name("knn-platform-", 0);
+        Thread.Builder builder = Thread.ofVirtual().name("knn-virtual-", 0);
 
         AtomicLong discardedLines = new AtomicLong(0);
 
