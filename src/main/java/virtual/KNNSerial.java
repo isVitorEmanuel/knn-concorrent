@@ -1,4 +1,4 @@
-package serial;
+package virtual;
 
 import classes.Neighbor;
 
