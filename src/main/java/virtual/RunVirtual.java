@@ -1,10 +1,11 @@
 package virtual;
 
 import classes.Neighbor;
+import generator.DataSetGenerator;
 
 import java.util.ArrayList;
 
-public class RunParallel {
+public class RunVirtual {
 
     public static void main(String[] args) {
         String path = "dataset_high_dim.csv";
@@ -30,7 +31,7 @@ public class RunParallel {
         for (int i = 0; i < numFeatures; i++) targetValues.add(500.0);
         Neighbor target = new Neighbor(targetValues, "Unknown");
 
-        KNNParallel knn = new KNNParallel();
+        KNNVirtual knn = new KNNVirtual();
 
         // ── Platform Threads ──────────────────────────────────────────────
         System.out.println(">>> Starting prediction with Platform Threads...");

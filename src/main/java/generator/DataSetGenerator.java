@@ -1,4 +1,4 @@
-package virtual;
+package generator;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -8,7 +8,7 @@ import java.util.Random;
 import java.util.Locale;
 
 /**
- * @class DataSetGenerator
+ * @class generator.DataSetGenerator
  * @brief Scalable utility class to generate high-dimensional datasets for KNN.
  * Generates a CSV file with double-valued features and a label column.
  * The number of features here must match NUM_FEATURES in RunSerial.java.
@@ -32,14 +32,14 @@ public class DataSetGenerator {
             long currentSize = 0;
             long rowCount = 0;
 
-            System.out.println(">>> starting dataset generation with " + NUM_FEATURES + " features...");
+            System.out.println("> starting dataset generation with " + NUM_FEATURES + " features...");
 
             /* create header to data file */
             StringBuilder header = new StringBuilder();
             for (int i = 1; i <= NUM_FEATURES; i++) {
                 header.append("feature_").append(i).append(",");
             }
-	    
+
             header.append("label\n");
             writer.write(header.toString());
 
@@ -60,14 +60,12 @@ public class DataSetGenerator {
                 if (rowCount % 100000 == 0) {
                     writer.flush();
                     currentSize = file.length();
-                    double mbGenerated = currentSize / (1024.0 * 1024.0);
-                    System.out.printf("- progress: %.2f mb generated | rows: %d\r", mbGenerated, rowCount);
                 }
             }
 
-            System.out.println("\n\n>>> dataset generated successfully.");
-            System.out.printf(">>> final size: %.2f mb%n", file.length() / (1024.0 * 1024.0));
-            System.out.println(">>> total rows: " + rowCount);
+            System.out.println("\n\n> dataset generated successfully.");
+            System.out.printf("> final size: %.2f mb%n", file.length() / (1024.0 * 1024.0));
+            System.out.println("> total rows: " + rowCount);
 
         } catch (IOException e) {
             System.err.println("error generating file: " + e.getMessage());

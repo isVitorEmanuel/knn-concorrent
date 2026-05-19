@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class KNNParallel {
+public class KNNVirtual {
 
     private static final int NUM_VIRTUAL_THREADS =
             Math.max(2, Runtime.getRuntime().availableProcessors() * 3);
