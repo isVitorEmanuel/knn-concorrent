@@ -1,4 +1,4 @@
-package semaphore;
+package atomic;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
@@ -12,7 +12,7 @@ import java.util.ArrayList;
  * initializing the KNN engine, and triggering the stream-based prediction
  * to handle large datasets (e.g., 1GB) without exceeding memory limits.
  */
-public class RunSemaphore {
+public class RunAtomic {
 
     /**
      * @brief Main execution method.
@@ -30,7 +30,7 @@ public class RunSemaphore {
         }
         Neighbor target = new Neighbor(targetValues, "Unknown");
 
-        KNNSemaphore knn = new KNNSemaphore();
+        KNNAtomic knn = new KNNAtomic();
         int k = 21;
 
         System.out.println(">>> starting prediction...");

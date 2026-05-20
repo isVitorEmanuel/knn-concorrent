@@ -1,25 +1,25 @@
-package semaphore;
+package atomic;
 
 import classes.Neighbor;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * @class KNNSemaphore
+ * @class KNNAtomic
  * @brief Implements the K-Nearest Neighbors algorithm using parallel platform threads
- * and a shared global priority queue protected via a binary Semaphore (Mutex).
+ * and a lock-free shared global state managed by an AtomicReference.
  */
-public class KNNSemaphore {
+public class KNNAtomic {
 
     private static final int NUM_PLATFORM_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors());
 
     /**
      * @record DistanceRecord
      * @brief Holds a neighbor data point and its calculated distance to the target.
-     * Implements Comparable to allow sorting and ordering within priority queues.
+     * Implements Comparable to allow natural ascending sorting by distance.
      */
     private record DistanceRecord(Neighbor neighbor, double distance) implements Comparable<DistanceRecord> {
         @Override
@@ -35,6 +35,63 @@ public class KNNSemaphore {
     private record ChunkBounds(long startByte, long endByte) {}
 
     /**
+     * @class ImmutableTopK
+     * @brief An immutable structure that holds a sorted list of the current best neighbors.
+     * Facilitates safe lock-free state transitions inside atomic references.
+     */
+    private static class ImmutableTopK {
+        final List<DistanceRecord> list;
+        final int k;
+
+        /**
+         * @method ImmutableTopK
+         * @brief Constructor for the initial empty state.
+         * @param k The maximum allowed capacity of neighbors.
+         */
+        ImmutableTopK(int k) {
+            this.k = k;
+            this.list = Collections.emptyList();
+        }
+
+        /**
+         * @method ImmutableTopK
+         * @brief Internal constructor to map a new immutable list snapshot.
+         * @param list The sorted list of records.
+         * @param k The maximum capacity.
+         */
+        ImmutableTopK(List<DistanceRecord> list, int k) {
+            this.k = k;
+            this.list = list;
+        }
+
+        /**
+         * @method tryUpdate
+         * @brief Evaluates a new record and returns a new immutable snapshot if it qualifies.
+         * Since the list is sorted in ascending order, the last element (size - 1) is always the worst.
+         * @param record The new distance record to evaluate.
+         * @return A new ImmutableTopK instance if updated, or null if the record does not qualify.
+         */
+        ImmutableTopK tryUpdate(DistanceRecord record) {
+            if (list.size() < k) {
+                List<DistanceRecord> newList = new ArrayList<>(list);
+                newList.add(record);
+                Collections.sort(newList);
+                return new ImmutableTopK(Collections.unmodifiableList(newList), k);
+            }
+
+            DistanceRecord worst = list.get(list.size() - 1);
+            if (record.distance < worst.distance) {
+                List<DistanceRecord> newList = new ArrayList<>(list);
+                newList.remove(list.size() - 1); // Remove o pior elemento (maior distância)
+                newList.add(record);
+                Collections.sort(newList); // Reordena
+                return new ImmutableTopK(Collections.unmodifiableList(newList), k);
+            }
+            return null;
+        }
+    }
+
+    /**
      * @method predictStream
      * @brief Entry point for the stream-based parallel classification.
      * Orchestrates the execution by invoking the parallel engine with the machine's allocated platform threads.
@@ -44,15 +101,17 @@ public class KNNSemaphore {
      * @return The predicted class label string.
      */
     public String predictStream(String filePath, Neighbor target, int k) {
-        System.out.printf("[Semaphore] Using %d platform threads with a shared global queue%n", NUM_PLATFORM_THREADS);
-        return runParallel(filePath, target, k, NUM_PLATFORM_THREADS);
+        System.out.printf("[Atomic] Using %d platform threads with lock-free AtomicReference%n", NUM_PLATFORM_THREADS);
+        String predict = runParallel(filePath, target, k, NUM_PLATFORM_THREADS);
+        System.out.println(predict);
+        return predict;
     }
 
     /**
      * @method runParallel
      * @brief Manages the execution lifecycle of the parallel platform workers.
-     * Computes file positions, initializes the shared global priority queue and the Semaphore,
-     * spawns threads, and triggers the final majority vote once all threads finish.
+     * Computes file positions, initializes the AtomicReference container, spawns threads,
+     * and triggers the final majority vote once all threads finish.
      * @param filePath Path to the CSV dataset file.
      * @param target The target instance to be classified.
      * @param k The number of nearest neighbors to consider.
@@ -70,20 +129,18 @@ public class KNNSemaphore {
             return "Unknown";
         }
 
-        Thread.Builder builder = Thread.ofPlatform().name("knn-semaphore-", 0);
+        Thread.Builder builder = Thread.ofPlatform().name("knn-atomic-", 0);
 
         int numChunks = chunks.size();
         Thread[] threads = new Thread[numChunks];
 
-        PriorityQueue<DistanceRecord> globalTopK = new PriorityQueue<>(k, Collections.reverseOrder());
-
-        Semaphore mutex = new Semaphore(1);
+        AtomicReference<ImmutableTopK> globalTopK = new AtomicReference<>(new ImmutableTopK(k));
 
         for (int i = 0; i < numChunks; i++) {
             ChunkBounds chunk = chunks.get(i);
 
             threads[i] = builder.unstarted(() -> {
-                processChunk(filePath, chunk, target, k, globalTopK, mutex);
+                processChunk(filePath, chunk, target, k, globalTopK);
             });
             threads[i].start();
         }
@@ -99,12 +156,13 @@ public class KNNSemaphore {
             }
         }
 
-        if (globalTopK.isEmpty()) {
+        ImmutableTopK finalResult = globalTopK.get();
+        if (finalResult.list.isEmpty()) {
             System.err.println("Error: no valid neighbors found.");
             return "Unknown";
         }
 
-        return majorityVote(globalTopK);
+        return majorityVote(finalResult.list);
     }
 
     /**
@@ -162,17 +220,16 @@ public class KNNSemaphore {
     /**
      * @method processChunk
      * @brief Processes a specific chunk of the file assigned to a single thread.
-     * Positions a stream at the starting byte, reads records, and coordinates updates
-     * into the shared global queue using a Semaphore to acquire and release access.
+     * Evaluates metrics and updates the shared atomic container via lock-free CAS loops,
+     * applying a fast-path read bypass to minimize contention.
      * @param filePath Path to the file.
      * @param chunk The pre-calculated boundary limits for this thread.
      * @param target The target instance being evaluated.
      * @param k The number of closest neighbors to filter.
-     * @param globalTopK The shared priority queue containing the global nearest entries.
-     * @param mutex The Semaphore instance controlling access to the shared queue.
+     * @param globalTopK The shared AtomicReference tracking the closest entries globally.
      */
     private void processChunk(String filePath, ChunkBounds chunk, Neighbor target, int k,
-                              PriorityQueue<DistanceRecord> globalTopK, Semaphore mutex) {
+                              AtomicReference<ImmutableTopK> globalTopK) {
         long chunkSize = chunk.endByte() - chunk.startByte();
 
         try (FileInputStream fis = new FileInputStream(filePath)) {
@@ -212,21 +269,27 @@ public class KNNSemaphore {
                     }
 
                     double dist = calculateEuclideanDistance(target, current);
-                    DistanceRecord record = new DistanceRecord(current, dist);
 
-                    try {
-                        mutex.acquire();
-                        if (globalTopK.size() < k) {
-                            globalTopK.add(record);
-                        } else if (dist < globalTopK.peek().distance) {
-                            globalTopK.poll();
-                            globalTopK.add(record);
+                    // 1. FAST-PATH (Leitura Volátil Pura): Evita disputa de escrita e alocações desnecessárias
+                    ImmutableTopK currentTopK = globalTopK.get();
+                    if (currentTopK.list.size() == k && dist >= currentTopK.list.get(k - 1).distance) {
+                        continue; // Elemento descartado imediatamente sem tocar no laço CAS
+                    }
+
+                    // 2. SLOW-PATH: Elemento qualificado. Entra no laço otimista de atualização atômica (CAS)
+                    DistanceRecord record = new DistanceRecord(current, dist);
+                    while (true) {
+                        currentTopK = globalTopK.get();
+                        ImmutableTopK nextTopK = currentTopK.tryUpdate(record);
+
+                        if (nextTopK == null) {
+                            break; // Outra thread mudou o estado e este registro não serve mais
                         }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } finally {
-                        mutex.release();
+
+                        // Executa a troca atômica se o estado não mudou no meio do caminho
+                        if (globalTopK.compareAndSet(currentTopK, nextTopK)) {
+                            break;
+                        }
                     }
                 }
             }
@@ -278,11 +341,11 @@ public class KNNSemaphore {
     /**
      * @method majorityVote
      * @brief Resolves class labels by frequency count over the consolidated nearest neighbors.
-     * Iterates over elements inside the queue, maps occurrence scores, and determines the modes.
-     * @param topK Priority queue containing the global nearest dataset entries.
+     * Iterates over elements inside the list, maps occurrence scores, and determines the modes.
+     * @param topK Immutable list containing the global nearest dataset entries.
      * @return String holding the winner classification label name.
      */
-    private String majorityVote(PriorityQueue<DistanceRecord> topK) {
+    private String majorityVote(List<DistanceRecord> topK) {
         Map<String, Integer> freq = new HashMap<>();
         for (DistanceRecord r : topK)
             freq.merge(r.neighbor.getLabel(), 1, Integer::sum);
