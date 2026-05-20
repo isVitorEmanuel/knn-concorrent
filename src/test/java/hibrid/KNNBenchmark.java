@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(0)
 public class KNNBenchmark {
 
-    private KNNVirtual knn;
+    private KNNHibrid knn;
     private Neighbor target;
     private String path;
     private int k;
@@ -24,7 +24,7 @@ public class KNNBenchmark {
     public void setUp() {
         path = "dataset_high_dim.csv";
         k = 21;
-        knn = new KNNVirtual();
+        knn = new KNNHibrid();
 
         ArrayList<Double> targetValues = new ArrayList<>();
         for (int i = 0; i < DataSetGenerator.NUM_FEATURES; i++) {

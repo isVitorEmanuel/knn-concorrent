@@ -6,17 +6,29 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * @class KNNHibrid
+ * @brief Implements the K-Nearest Neighbors algorithm using a hybrid producer-consumer architecture.
+ * A single virtual thread reads the file and dispatches line batches into a shared queue,
+ * while multiple platform threads consume and process those batches concurrently.
+ */
 public class KNNHibrid {
 
     private static final int NUM_PLATFORM_THREADS =
             Math.max(2, Runtime.getRuntime().availableProcessors());
 
-    // Tamanho do lote de linhas enviado para reduzir o overhead de sincronização
+    /** Number of lines grouped into a single batch to reduce synchronization overhead. */
     private static final int BATCH_SIZE = 5_000;
+
+    /** Maximum number of batches held in the blocking queue at any time. */
     private static final int QUEUE_CAPACITY = 200;
 
+    /**
+     * @record DistanceRecord
+     * @brief Holds a neighbor data point and its calculated distance to the target.
+     * Implements Comparable to allow sorting and ordering within priority queues.
+     */
     private record DistanceRecord(Neighbor neighbor, double distance) implements Comparable<DistanceRecord> {
         @Override
         public int compareTo(DistanceRecord other) {
@@ -24,57 +36,63 @@ public class KNNHibrid {
         }
     }
 
+    /**
+     * @method predictStream
+     * @brief Entry point for the hybrid parallel classification.
+     * Orchestrates the execution by invoking the hybrid engine with one virtual producer
+     * and multiple platform consumers.
+     * @param filePath Path to the CSV dataset file.
+     * @param target The target instance to be classified.
+     * @param k The number of nearest neighbors to consider.
+     * @return The predicted class label string.
+     */
     public String predictStream(String filePath, Neighbor target, int k) {
         System.out.printf("[Hybrid Batched] 1 Virtual (Producer) | %d Platform (Consumers)%n", NUM_PLATFORM_THREADS);
-
-        AtomicLong processedLines = new AtomicLong(0);
-        String result = runHybrid(filePath, target, k, processedLines);
-
-        System.out.printf(">>> Total lines processed (Hybrid): %d%n", processedLines.get());
-        return result;
+        return runHybrid(filePath, target, k);
     }
 
-    private String runHybrid(String filePath, Neighbor target, int k, AtomicLong processedLines) {
-        // Agora a fila trafega LISTAS de Strings (Lotes) em vez de linhas individuais
+    /**
+     * @method runHybrid
+     * @brief Manages the full lifecycle of the hybrid producer-consumer pipeline.
+     * Initializes the shared batch queue, spawns platform consumer threads and a single
+     * virtual producer thread, waits for completion, merges local results, and performs
+     * the final majority vote.
+     * @param filePath Path to the CSV dataset file.
+     * @param target The target instance to be classified.
+     * @param k The number of nearest neighbors to consider.
+     * @return The final predicted label or "Unknown" in case of failures.
+     */
+    private String runHybrid(String filePath, Neighbor target, int k) {
         BlockingQueue<List<String>> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
-        AtomicLong discardedLines = new AtomicLong(0);
 
         @SuppressWarnings("unchecked")
         PriorityQueue<DistanceRecord>[] results = new PriorityQueue[NUM_PLATFORM_THREADS];
         Thread[] consumers = new Thread[NUM_PLATFORM_THREADS];
 
-        // 1. INICIALIZA AS CONSUMIDORAS (PLATFORM THREADS)
+        // 1. INITIALIZE CONSUMERS (PLATFORM THREADS)
         Thread.Builder platformBuilder = Thread.ofPlatform().name("knn-consumer-", 0);
 
         for (int i = 0; i < NUM_PLATFORM_THREADS; i++) {
             final int index = i;
             consumers[i] = platformBuilder.unstarted(() -> {
                 PriorityQueue<DistanceRecord> localTopK = new PriorityQueue<>(k, Collections.reverseOrder());
-                long localProcessed = 0;
-                long localDiscarded = 0;
 
                 try {
                     while (true) {
-                        List<String> batch = queue.take(); // Retira um lote inteiro da fila
+                        List<String> batch = queue.take();
 
-                        // Usamos uma lista vazia como Poison Pill (sinal de término)
-                        if (batch.isEmpty()) {
-                            break;
-                        }
+                        // An empty list is used as a Poison Pill to signal termination
+                        if (batch.isEmpty()) break;
 
-                        // Processa o lote localmente sem nenhuma concorrência ou lock
+                        // Process the batch locally with no contention or locking
                         for (String line : batch) {
                             if (line.isBlank()) continue;
 
                             Neighbor current = parseLineToNeighbor(line);
                             if (current == null) continue;
 
-                            if (current.getValues().size() != target.getValues().size()) {
-                                localDiscarded++;
-                                continue;
-                            }
+                            if (current.getValues().size() != target.getValues().size()) continue;
 
-                            localProcessed++;
                             double dist = calculateEuclideanDistance(target, current);
 
                             if (localTopK.size() < k) {
@@ -88,21 +106,17 @@ public class KNNHibrid {
                     results[index] = localTopK;
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                } finally {
-                    // Atualiza os contadores globais apenas UMA vez por thread
-                    processedLines.addAndGet(localProcessed);
-                    discardedLines.addAndGet(localDiscarded);
                 }
             });
             consumers[i].start();
         }
 
-        // 2. INICIALIZA A PRODUTORA (UMA ÚNICA VIRTUAL THREAD)
+        // 2. INITIALIZE PRODUCER (SINGLE VIRTUAL THREAD)
         Thread producer = Thread.ofVirtual().name("knn-producer").start(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
 
-                String line = reader.readLine(); // Pula o Header do CSV
+                String line = reader.readLine(); // Skip CSV header
                 if (line == null) return;
 
                 List<String> currentBatch = new ArrayList<>(BATCH_SIZE);
@@ -110,14 +124,14 @@ public class KNNHibrid {
                 while ((line = reader.readLine()) != null) {
                     currentBatch.add(line);
 
-                    // Quando o lote enche, envia para a fila
+                    // When the batch is full, dispatch it to the queue
                     if (currentBatch.size() == BATCH_SIZE) {
                         queue.put(currentBatch);
                         currentBatch = new ArrayList<>(BATCH_SIZE);
                     }
                 }
 
-                // Envia o último lote residual, se houver
+                // Dispatch the remaining partial batch if present
                 if (!currentBatch.isEmpty()) {
                     queue.put(currentBatch);
                 }
@@ -127,7 +141,7 @@ public class KNNHibrid {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } finally {
-                // Envia uma lista vazia (Poison Pill) para cada consumidor finalizar
+                // Send one empty Poison Pill per consumer to signal end of stream
                 for (int i = 0; i < NUM_PLATFORM_THREADS; i++) {
                     try {
                         queue.put(Collections.emptyList());
@@ -138,28 +152,19 @@ public class KNNHibrid {
             }
         });
 
-        // 3. AGUARDA A FINALIZAÇÃO
+        // 3. AWAIT COMPLETION
         try {
             producer.join();
-            for (Thread t : consumers) {
-                t.join();
-            }
+            for (Thread t : consumers) t.join();
         } catch (InterruptedException e) {
             System.err.println("Main thread interrupted. Cleaning up...");
             producer.interrupt();
-            for (Thread t : consumers) {
-                if (t != null) t.interrupt();
-            }
+            for (Thread t : consumers) if (t != null) t.interrupt();
             Thread.currentThread().interrupt();
             return "Unknown";
         }
 
-        long discarded = discardedLines.get();
-        if (discarded > 0) {
-            System.err.printf("[WARNING] %d lines discarded — dimension mismatch.%n", discarded);
-        }
-
-        // 4. MERGE GLOBAL DOS TOP-K
+        // 4. MERGE GLOBAL TOP-K
         PriorityQueue<DistanceRecord> globalTopK = new PriorityQueue<>(k, Collections.reverseOrder());
         for (PriorityQueue<DistanceRecord> localTopK : results) {
             if (localTopK == null) continue;
@@ -181,6 +186,14 @@ public class KNNHibrid {
         return majorityVote(globalTopK);
     }
 
+    /**
+     * @method calculateEuclideanDistance
+     * @brief Computes the Euclidean distance between two Neighbor multidimensional vectors.
+     * Loops through numerical features sequentially to perform geometric distance calculation.
+     * @param target The reference entity.
+     * @param dataPoint The dataset record entity.
+     * @return Geometric Euclidean distance as a double value.
+     */
     private double calculateEuclideanDistance(Neighbor target, Neighbor dataPoint) {
         double sum = 0.0;
         ArrayList<Double> tv = target.getValues();
@@ -192,6 +205,14 @@ public class KNNHibrid {
         return Math.sqrt(sum);
     }
 
+    /**
+     * @method parseLineToNeighbor
+     * @brief Converts a comma-separated text line into a typed Neighbor domain model.
+     * Extracts numerical properties from previous columns and matches the final column
+     * to the category/classification label string.
+     * @param line Raw line string extracted from the text file.
+     * @return A validated Neighbor object instance or null if parsing fails.
+     */
     private Neighbor parseLineToNeighbor(String line) {
         String[] parts = line.split(",");
         if (parts.length < 2) return null;
@@ -205,6 +226,13 @@ public class KNNHibrid {
         }
     }
 
+    /**
+     * @method majorityVote
+     * @brief Resolves class labels by frequency count over the consolidated nearest neighbors.
+     * Iterates over elements inside the queue, maps occurrence scores, and determines the modes.
+     * @param topK Priority queue containing the global nearest dataset entries.
+     * @return String holding the winner classification label name.
+     */
     private String majorityVote(PriorityQueue<DistanceRecord> topK) {
         Map<String, Integer> freq = new HashMap<>();
         for (DistanceRecord r : topK)
