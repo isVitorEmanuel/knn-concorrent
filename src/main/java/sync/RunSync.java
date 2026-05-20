@@ -1,4 +1,4 @@
-package serial;
+package sync;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
@@ -12,7 +12,7 @@ import java.util.ArrayList;
  * initializing the KNN engine, and triggering the stream-based prediction
  * to handle large datasets (e.g., 1GB) without exceeding memory limits.
  */
-public class RunSerial {
+public class RunSync {
 
     /**
      * @brief Main execution method.
@@ -30,7 +30,7 @@ public class RunSerial {
         }
         Neighbor target = new Neighbor(targetValues, "Unknown");
 
-        KNNSerial knn = new KNNSerial();
+        KNNSync knn = new KNNSync();
         int k = 21;
 
         System.out.println(">>> starting prediction...");
