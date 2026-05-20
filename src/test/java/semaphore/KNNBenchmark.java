@@ -1,4 +1,4 @@
-package sync;
+package semaphore;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(0)
 public class KNNBenchmark {
 
-    private KNNSync knn;
+    private KNNSemaphore knn;
     private Neighbor target;
     private String path;
     private int k;
@@ -23,7 +23,7 @@ public class KNNBenchmark {
     public void setUp() {
         path = "dataset_high_dim.csv";
         k = 21;
-        knn = new KNNSync();
+        knn = new KNNSemaphore();
 
         ArrayList<Double> targetValues = new ArrayList<>();
         for (int i = 0; i < DataSetGenerator.NUM_FEATURES; i++) {

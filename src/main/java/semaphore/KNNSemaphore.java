@@ -1,17 +1,18 @@
-package sync;
+package platform;
 
 import classes.Neighbor;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 
 /**
- * @class KNNSynchronized
+ * @class KNNSemaphore
  * @brief Implements the K-Nearest Neighbors algorithm using parallel platform threads
- * and a shared global priority queue protected via synchronized blocks.
+ * and a shared global priority queue protected via a binary Semaphore (Mutex).
  */
-public class KNNSync {
+public class KNNSemaphore {
 
     private static final int NUM_PLATFORM_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() * 3);
 
@@ -43,15 +44,15 @@ public class KNNSync {
      * @return The predicted class label string.
      */
     public String predictStream(String filePath, Neighbor target, int k) {
-        System.out.printf("[Synchronized] Using %d platform threads with shared global queue%n", NUM_PLATFORM_THREADS);
+        System.out.printf("[Semaphore] Using %d platform threads with a shared global queue%n", NUM_PLATFORM_THREADS);
         return runParallel(filePath, target, k, NUM_PLATFORM_THREADS);
     }
 
     /**
      * @method runParallel
      * @brief Manages the execution lifecycle of the parallel platform workers.
-     * Computes file positions, initializes the shared global priority queue, spawns threads,
-     * and triggers the final majority vote once all threads finish.
+     * Computes file positions, initializes the shared global priority queue and the Semaphore,
+     * spawns threads, and triggers the final majority vote once all threads finish.
      * @param filePath Path to the CSV dataset file.
      * @param target The target instance to be classified.
      * @param k The number of nearest neighbors to consider.
@@ -69,19 +70,20 @@ public class KNNSync {
             return "Unknown";
         }
 
-        Thread.Builder builder = Thread.ofVirtual().name("knn-synchronized-", 0);
+        Thread.Builder builder = Thread.ofPlatform().name("knn-semaphore-", 0);
 
         int numChunks = chunks.size();
         Thread[] threads = new Thread[numChunks];
 
-        // Fila de prioridade global compartilhada entre todas as threads
         PriorityQueue<DistanceRecord> globalTopK = new PriorityQueue<>(k, Collections.reverseOrder());
+
+        Semaphore mutex = new Semaphore(1);
 
         for (int i = 0; i < numChunks; i++) {
             ChunkBounds chunk = chunks.get(i);
 
             threads[i] = builder.unstarted(() -> {
-                processChunk(filePath, chunk, target, k, globalTopK);
+                processChunk(filePath, chunk, target, k, globalTopK, mutex);
             });
             threads[i].start();
         }
@@ -97,7 +99,6 @@ public class KNNSync {
             }
         }
 
-        // Como a fila foi atualizada concorrentemente de forma segura, não há necessidade de mesclagem manual aqui
         if (globalTopK.isEmpty()) {
             System.err.println("Error: no valid neighbors found.");
             return "Unknown";
@@ -162,15 +163,16 @@ public class KNNSync {
      * @method processChunk
      * @brief Processes a specific chunk of the file assigned to a single thread.
      * Positions a stream at the starting byte, reads records, and coordinates updates
-     * into the shared global queue using synchronized blocks.
+     * into the shared global queue using a Semaphore to acquire and release access.
      * @param filePath Path to the file.
      * @param chunk The pre-calculated boundary limits for this thread.
      * @param target The target instance being evaluated.
      * @param k The number of closest neighbors to filter.
      * @param globalTopK The shared priority queue containing the global nearest entries.
+     * @param mutex The Semaphore instance controlling access to the shared queue.
      */
     private void processChunk(String filePath, ChunkBounds chunk, Neighbor target, int k,
-                              PriorityQueue<DistanceRecord> globalTopK) {
+                              PriorityQueue<DistanceRecord> globalTopK, Semaphore mutex) {
         long chunkSize = chunk.endByte() - chunk.startByte();
 
         try (FileInputStream fis = new FileInputStream(filePath)) {
@@ -212,14 +214,21 @@ public class KNNSync {
                     double dist = calculateEuclideanDistance(target, current);
                     DistanceRecord record = new DistanceRecord(current, dist);
 
-                    // Ponto de Sincronização: Bloqueia o acesso à fila para garantir mutação segura
-                    synchronized (globalTopK) {
+                    // Ponto de Sincronização: Solicita a permissão do semáforo
+                    try {
+                        mutex.acquire();
                         if (globalTopK.size() < k) {
                             globalTopK.add(record);
                         } else if (dist < globalTopK.peek().distance) {
                             globalTopK.poll();
                             globalTopK.add(record);
                         }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break; // Sai do laço se a thread for interrompida
+                    } finally {
+                        // Sempre libera a permissão no bloco finally
+                        mutex.release();
                     }
                 }
             }
