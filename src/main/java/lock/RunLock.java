@@ -1,4 +1,4 @@
-package barrier;
+package lock;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
@@ -12,7 +12,7 @@ import java.util.ArrayList;
  * initializing the KNN engine, and triggering the stream-based prediction
  * to handle large datasets (e.g., 1GB) without exceeding memory limits.
  */
-public class RunBarrier {
+public class RunLock {
 
     /**
      * @brief Main execution method.
@@ -30,7 +30,7 @@ public class RunBarrier {
         }
         Neighbor target = new Neighbor(targetValues, "Unknown");
 
-        KNNBarrier knn = new KNNBarrier();
+        KNNLock knn = new KNNLock();
         int k = 21;
 
         System.out.println(">>> starting prediction...");
