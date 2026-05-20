@@ -1,4 +1,4 @@
-package platform;
+package semaphore;
 
 import classes.Neighbor;
 
