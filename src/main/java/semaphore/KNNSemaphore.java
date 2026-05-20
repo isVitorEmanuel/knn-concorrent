@@ -14,7 +14,7 @@ import java.util.concurrent.Semaphore;
  */
 public class KNNSemaphore {
 
-    private static final int NUM_PLATFORM_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() * 3);
+    private static final int NUM_PLATFORM_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors());
 
     /**
      * @record DistanceRecord
@@ -214,7 +214,6 @@ public class KNNSemaphore {
                     double dist = calculateEuclideanDistance(target, current);
                     DistanceRecord record = new DistanceRecord(current, dist);
 
-                    // Ponto de Sincronização: Solicita a permissão do semáforo
                     try {
                         mutex.acquire();
                         if (globalTopK.size() < k) {
@@ -225,9 +224,8 @@ public class KNNSemaphore {
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        break; // Sai do laço se a thread for interrompida
+                        break;
                     } finally {
-                        // Sempre libera a permissão no bloco finally
                         mutex.release();
                     }
                 }
