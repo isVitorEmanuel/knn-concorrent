@@ -37,36 +37,21 @@ public class KNNSemaphore {
     /**
      * @method predictStream
      * @brief Entry point for the stream-based parallel classification.
-     * Orchestrates the execution by invoking the parallel engine with the machine's allocated platform threads.
-     * @param filePath Path to the CSV dataset file.
-     * @param target The target instance to be classified.
-     * @param k The number of nearest neighbors to consider.
-     * @return The predicted class label string.
      */
     public String predictStream(String filePath, Neighbor target, int k) {
-        System.out.printf("[Semaphore] Using %d platform threads with a shared global queue%n", NUM_PLATFORM_THREADS);
+        // Removido o System.out.printf para não poluir ou penalizar o JMH
         return runParallel(filePath, target, k, NUM_PLATFORM_THREADS);
     }
 
     /**
      * @method runParallel
      * @brief Manages the execution lifecycle of the parallel platform workers.
-     * Computes file positions, initializes the shared global priority queue and the Semaphore,
-     * spawns threads, and triggers the final majority vote once all threads finish.
-     * @param filePath Path to the CSV dataset file.
-     * @param target The target instance to be classified.
-     * @param k The number of nearest neighbors to consider.
-     * @param numThreads The total number of platform threads to deploy.
-     * @return The final predicted label or "Unknown" in case of failures.
      */
     private String runParallel(String filePath, Neighbor target, int k, int numThreads) {
         List<ChunkBounds> chunks;
         try {
             chunks = computeChunks(filePath, numThreads);
-            System.out.printf("[runParallel] %d chunks | target dim=%d%n",
-                    chunks.size(), target.getValues().size());
         } catch (IOException e) {
-            System.err.println("Error computing file chunks: " + e.getMessage());
             return "Unknown";
         }
 
@@ -92,7 +77,6 @@ public class KNNSemaphore {
             try {
                 t.join();
             } catch (InterruptedException e) {
-                System.err.println("Main thread interrupted. Stopping workers...");
                 for (Thread worker : threads) if (worker != null) worker.interrupt();
                 Thread.currentThread().interrupt();
                 return "Unknown";
@@ -100,7 +84,6 @@ public class KNNSemaphore {
         }
 
         if (globalTopK.isEmpty()) {
-            System.err.println("Error: no valid neighbors found.");
             return "Unknown";
         }
 
@@ -110,12 +93,6 @@ public class KNNSemaphore {
     /**
      * @method computeChunks
      * @brief Calculates balanced byte chunks across the file, ensuring line alignment.
-     * Dynamically seeks line breaks ('\n') to ensure that lines are not chopped mid-text
-     * when dividing the file among worker threads.
-     * @param filePath Path to the file.
-     * @param numChunks Desired number of partitions.
-     * @return A list containing the byte boundaries for each chunk.
-     * @throws IOException If file access errors occur.
      */
     private List<ChunkBounds> computeChunks(String filePath, int numChunks) throws IOException {
         List<ChunkBounds> chunks = new ArrayList<>();
@@ -162,14 +139,7 @@ public class KNNSemaphore {
     /**
      * @method processChunk
      * @brief Processes a specific chunk of the file assigned to a single thread.
-     * Positions a stream at the starting byte, reads records, and coordinates updates
-     * into the shared global queue using a Semaphore to acquire and release access.
-     * @param filePath Path to the file.
-     * @param chunk The pre-calculated boundary limits for this thread.
-     * @param target The target instance being evaluated.
-     * @param k The number of closest neighbors to filter.
-     * @param globalTopK The shared priority queue containing the global nearest entries.
-     * @param mutex The Semaphore instance controlling access to the shared queue.
+     * Uses a LOCAL priority queue to avoid Semaphore contention, merging to global at the end.
      */
     private void processChunk(String filePath, ChunkBounds chunk, Neighbor target, int k,
                               PriorityQueue<DistanceRecord> globalTopK, Semaphore mutex) {
@@ -201,6 +171,9 @@ public class KNNSemaphore {
 
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(boundedIn, StandardCharsets.UTF_8))) {
                 String line;
+
+                PriorityQueue<DistanceRecord> localTopK = new PriorityQueue<>(k, Collections.reverseOrder());
+
                 while ((line = reader.readLine()) != null) {
                     if (line.isBlank()) continue;
 
@@ -214,34 +187,37 @@ public class KNNSemaphore {
                     double dist = calculateEuclideanDistance(target, current);
                     DistanceRecord record = new DistanceRecord(current, dist);
 
-                    try {
-                        mutex.acquire();
+                    if (localTopK.size() < k) {
+                        localTopK.add(record);
+                    } else if (dist < localTopK.peek().distance()) {
+                        localTopK.poll();
+                        localTopK.add(record);
+                    }
+                }
+
+                try {
+                    mutex.acquire();
+                    for (DistanceRecord record : localTopK) {
                         if (globalTopK.size() < k) {
                             globalTopK.add(record);
-                        } else if (dist < globalTopK.peek().distance) {
+                        } else if (record.distance() < globalTopK.peek().distance()) {
                             globalTopK.poll();
                             globalTopK.add(record);
                         }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } finally {
-                        mutex.release();
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    mutex.release();
                 }
             }
         } catch (IOException e) {
-            System.err.println("Error processing chunk: " + e.getMessage());
         }
     }
 
     /**
      * @method calculateEuclideanDistance
      * @brief Computes the Euclidean distance between two Neighbor multidimensional vectors.
-     * Loops through numerical features sequentially to perform geometric distance calculation.
-     * @param target The reference entity.
-     * @param dataPoint The dataset record entity.
-     * @return Geometric Euclidean distance as a double value.
      */
     private double calculateEuclideanDistance(Neighbor target, Neighbor dataPoint) {
         double sum = 0.0;
@@ -257,10 +233,6 @@ public class KNNSemaphore {
     /**
      * @method parseLineToNeighbor
      * @brief Converts a comma-separated text line into a typed Neighbor domain model.
-     * Extracts numerical properties from previous columns and matches the final column
-     * to the category/classification label string.
-     * @param line Raw line string extracted from the text file.
-     * @return A validated Neighbor object instance or null if parsing fails.
      */
     private Neighbor parseLineToNeighbor(String line) {
         String[] parts = line.split(",");
@@ -278,9 +250,6 @@ public class KNNSemaphore {
     /**
      * @method majorityVote
      * @brief Resolves class labels by frequency count over the consolidated nearest neighbors.
-     * Iterates over elements inside the queue, maps occurrence scores, and determines the modes.
-     * @param topK Priority queue containing the global nearest dataset entries.
-     * @return String holding the winner classification label name.
      */
     private String majorityVote(PriorityQueue<DistanceRecord> topK) {
         Map<String, Integer> freq = new HashMap<>();
