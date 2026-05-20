@@ -13,7 +13,7 @@ import java.util.*;
  */
 public class KNNSync {
 
-    private static final int NUM_PLATFORM_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors());
+    private static final int NUM_PLATFORM_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() * 3);
 
     /**
      * @record DistanceRecord
