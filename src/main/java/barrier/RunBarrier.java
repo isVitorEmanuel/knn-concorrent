@@ -1,4 +1,4 @@
-package atomic;
+package barrier;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
@@ -12,7 +12,7 @@ import java.util.ArrayList;
  * initializing the KNN engine, and triggering the stream-based prediction
  * to handle large datasets (e.g., 1GB) without exceeding memory limits.
  */
-public class RunAtomic {
+public class RunBarrier {
 
     /**
      * @brief Main execution method.
@@ -30,7 +30,7 @@ public class RunAtomic {
         }
         Neighbor target = new Neighbor(targetValues, "Unknown");
 
-        KNNAtomic knn = new KNNAtomic();
+        KNNBarrier knn = new KNNBarrier();
         int k = 21;
 
         System.out.println(">>> starting prediction...");

@@ -1,4 +1,4 @@
-package atomic;
+package barrier;
 
 import classes.Neighbor;
 import generator.DataSetGenerator;
@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(0)
 public class KNNBenchmark {
 
-    private KNNAtomic knn;
+    private KNNBarrier knn;
     private Neighbor target;
     private String path;
     private int k;
@@ -23,7 +23,7 @@ public class KNNBenchmark {
     public void setUp() {
         path = "dataset_high_dim.csv";
         k = 21;
-        knn = new KNNAtomic();
+        knn = new KNNBarrier();
 
         ArrayList<Double> targetValues = new ArrayList<>();
         for (int i = 0; i < DataSetGenerator.NUM_FEATURES; i++) {
