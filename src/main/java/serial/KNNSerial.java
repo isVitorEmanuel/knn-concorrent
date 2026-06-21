@@ -14,6 +14,11 @@ import java.util.*;
  */
 public class KNNSerial {
 
+    /**
+     * @class DistanceRecord
+     * @brief Holds a neighbor data point and its calculated distance to the target.
+     * Implements Comparable to allow sorting and ordering within priority queues.
+     */
     private static class DistanceRecord implements Comparable<DistanceRecord> {
         Neighbor neighbor;
         Double distance;
@@ -29,6 +34,16 @@ public class KNNSerial {
         }
     }
 
+    /**
+     * @method predictStream
+     * @brief Reads the dataset line by line from a CSV file, computes distances
+     * to the target, maintains a max-heap of size K, and returns
+     * the majority label among the K nearest neighbors.
+     * @param filePath Path to the CSV dataset file.
+     * @param target The target instance to be classified.
+     * @param k The number of nearest neighbors to consider.
+     * @return The predicted class label string, or "Unknown" if no valid data found.
+     */
     public String predictStream(String filePath, Neighbor target, int k) {
         PriorityQueue<DistanceRecord> pq = new PriorityQueue<>(Collections.reverseOrder());
 
@@ -71,6 +86,14 @@ public class KNNSerial {
         return Collections.max(labelFrequencies.entrySet(), Map.Entry.comparingByValue()).getKey();
     }
 
+    /**
+     * @method parseLineToNeighbor
+     * @brief Converts a comma-separated text line into a typed Neighbor domain model.
+     * Extracts numerical properties from previous columns and matches the final column
+     * to the category/classification label string.
+     * @param line Raw line string extracted from the text file.
+     * @return A validated Neighbor object instance or null if parsing fails.
+     */
     private Neighbor parseLineToNeighbor(String line) {
         String[] parts = line.split(",");
         if (parts.length < 2) return null;
@@ -86,11 +109,18 @@ public class KNNSerial {
         }
     }
 
+    /**
+     * @method calculateEuclideanDistance
+     * @brief Computes the Euclidean distance between two Neighbor multidimensional vectors.
+     * Loops through numerical features sequentially to perform geometric distance calculation.
+     * @param target The reference entity.
+     * @param dataPoint The dataset record entity.
+     * @return Geometric Euclidean distance as a double value.
+     */
     private Double calculateEuclideanDistance(Neighbor target, Neighbor dataPoint) {
         Double sum = 0.0;
         ArrayList<Double> targetValues = target.getValues();
         ArrayList<Double> dataValues = dataPoint.getValues();
-
         for (int i = 0; i < targetValues.size(); i++) {
             Double diff = targetValues.get(i) - dataValues.get(i);
             sum += Math.pow(diff, 2.0);

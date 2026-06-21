@@ -141,7 +141,7 @@ public class KNNVirtual {
 
             raf.seek(0);
             int b;
-            while ((b = raf.read()) != -1 && b != '\n') { /* skip header */ }
+            while ((b = raf.read()) != -1 && b != '\n') {}
 
             if (raf.getFilePointer() >= fileSize)
                 throw new IOException("File contains only the header — no data.");
@@ -159,7 +159,7 @@ public class KNNVirtual {
                 } else {
                     long rawEnd = dataStart + (long) (i + 1) * rawChunkSize;
                     raf.seek(rawEnd);
-                    while ((b = raf.read()) != -1 && b != '\n') { /* align */ }
+                    while ((b = raf.read()) != -1 && b != '\n') {}
                     chunkEnd = (b == -1) ? fileSize : raf.getFilePointer();
                 }
 

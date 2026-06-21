@@ -20,7 +20,7 @@ import classes.Neighbor;
 
 @BenchmarkMode({Mode.Throughput, Mode.AverageTime})
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 1, time = 2, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 3, time = 2, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 3, timeUnit = TimeUnit.SECONDS)
 @Fork(0)
 @State(Scope.Benchmark)

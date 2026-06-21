@@ -39,7 +39,6 @@ public class KNNSemaphore {
      * @brief Entry point for the stream-based parallel classification.
      */
     public String predictStream(String filePath, Neighbor target, int k) {
-        // Removido o System.out.printf para não poluir ou penalizar o JMH
         return runParallel(filePath, target, k, NUM_PLATFORM_THREADS);
     }
 
@@ -103,7 +102,7 @@ public class KNNSemaphore {
 
             raf.seek(0);
             int b;
-            while ((b = raf.read()) != -1 && b != '\n') { /* pula header */ }
+            while ((b = raf.read()) != -1 && b != '\n') {}
 
             if (raf.getFilePointer() >= fileSize)
                 throw new IOException("File contains only the header — no data.");
@@ -121,7 +120,7 @@ public class KNNSemaphore {
                 } else {
                     long rawEnd = dataStart + (long) (i + 1) * rawChunkSize;
                     raf.seek(rawEnd);
-                    while ((b = raf.read()) != -1 && b != '\n') { /* alinha */ }
+                    while ((b = raf.read()) != -1 && b != '\n') {}
                     chunkEnd = (b == -1) ? fileSize : raf.getFilePointer();
                 }
 

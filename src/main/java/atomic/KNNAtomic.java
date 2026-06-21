@@ -184,7 +184,7 @@ public class KNNAtomic {
 
             raf.seek(0);
             int b;
-            while ((b = raf.read()) != -1 && b != '\n') { /* pula header */ }
+            while ((b = raf.read()) != -1 && b != '\n') { }
 
             if (raf.getFilePointer() >= fileSize)
                 throw new IOException("File contains only the header — no data.");
@@ -270,23 +270,20 @@ public class KNNAtomic {
 
                     double dist = calculateEuclideanDistance(target, current);
 
-                    // 1. FAST-PATH (Leitura Volátil Pura): Evita disputa de escrita e alocações desnecessárias
                     ImmutableTopK currentTopK = globalTopK.get();
                     if (currentTopK.list.size() == k && dist >= currentTopK.list.get(k - 1).distance) {
-                        continue; // Elemento descartado imediatamente sem tocar no laço CAS
+                        continue;
                     }
 
-                    // 2. SLOW-PATH: Elemento qualificado. Entra no laço otimista de atualização atômica (CAS)
                     DistanceRecord record = new DistanceRecord(current, dist);
                     while (true) {
                         currentTopK = globalTopK.get();
                         ImmutableTopK nextTopK = currentTopK.tryUpdate(record);
 
                         if (nextTopK == null) {
-                            break; // Outra thread mudou o estado e este registro não serve mais
+                            break;
                         }
 
-                        // Executa a troca atômica se o estado não mudou no meio do caminho
                         if (globalTopK.compareAndSet(currentTopK, nextTopK)) {
                             break;
                         }
