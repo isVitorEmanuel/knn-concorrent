@@ -69,7 +69,6 @@ public class KNNHibrid {
         PriorityQueue<DistanceRecord>[] results = new PriorityQueue[NUM_PLATFORM_THREADS];
         Thread[] consumers = new Thread[NUM_PLATFORM_THREADS];
 
-        // 1. INITIALIZE CONSUMERS (PLATFORM THREADS)
         Thread.Builder platformBuilder = Thread.ofPlatform().name("knn-consumer-", 0);
 
         for (int i = 0; i < NUM_PLATFORM_THREADS; i++) {
@@ -81,10 +80,8 @@ public class KNNHibrid {
                     while (true) {
                         List<String> batch = queue.take();
 
-                        // An empty list is used as a Poison Pill to signal termination
                         if (batch.isEmpty()) break;
 
-                        // Process the batch locally with no contention or locking
                         for (String line : batch) {
                             if (line.isBlank()) continue;
 
@@ -111,12 +108,11 @@ public class KNNHibrid {
             consumers[i].start();
         }
 
-        // 2. INITIALIZE PRODUCER (SINGLE VIRTUAL THREAD)
         Thread producer = Thread.ofVirtual().name("knn-producer").start(() -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
 
-                String line = reader.readLine(); // Skip CSV header
+                String line = reader.readLine();
                 if (line == null) return;
 
                 List<String> currentBatch = new ArrayList<>(BATCH_SIZE);
@@ -124,14 +120,12 @@ public class KNNHibrid {
                 while ((line = reader.readLine()) != null) {
                     currentBatch.add(line);
 
-                    // When the batch is full, dispatch it to the queue
                     if (currentBatch.size() == BATCH_SIZE) {
                         queue.put(currentBatch);
                         currentBatch = new ArrayList<>(BATCH_SIZE);
                     }
                 }
 
-                // Dispatch the remaining partial batch if present
                 if (!currentBatch.isEmpty()) {
                     queue.put(currentBatch);
                 }
@@ -141,7 +135,6 @@ public class KNNHibrid {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } finally {
-                // Send one empty Poison Pill per consumer to signal end of stream
                 for (int i = 0; i < NUM_PLATFORM_THREADS; i++) {
                     try {
                         queue.put(Collections.emptyList());
@@ -152,7 +145,6 @@ public class KNNHibrid {
             }
         });
 
-        // 3. AWAIT COMPLETION
         try {
             producer.join();
             for (Thread t : consumers) t.join();
@@ -164,7 +156,6 @@ public class KNNHibrid {
             return "Unknown";
         }
 
-        // 4. MERGE GLOBAL TOP-K
         PriorityQueue<DistanceRecord> globalTopK = new PriorityQueue<>(k, Collections.reverseOrder());
         for (PriorityQueue<DistanceRecord> localTopK : results) {
             if (localTopK == null) continue;

@@ -9,7 +9,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @class KNNLock
- * @brief Implements the K-Nearest Neighbors algorithm using parallel Virtual Threads
+ * @brief Implements the K-Nearest Neighbors algorithm using parallel platform threads
  * and a ReentrantLock to safely coordinate concurrent updates to a shared global Top-K queue.
  */
 public class KNNLock {
@@ -43,15 +43,15 @@ public class KNNLock {
      * @return The predicted class label string.
      */
     public String predictStream(String filePath, Neighbor target, int k) {
-        System.out.printf("[ReentrantLock] Using %d virtual threads with shared global queue synchronization%n", NUM_PLATFORM_THREADS);
+        System.out.printf("[ReentrantLock] Using %d platform threads with shared global queue synchronization%n", NUM_PLATFORM_THREADS);
         return runParallel(filePath, target, k, NUM_PLATFORM_THREADS);
     }
 
     /**
      * @method runParallel
-     * @brief Manages the execution lifecycle of the virtual worker threads.
+     * @brief Manages the execution lifecycle of the platform worker threads.
      * Splices the source file, creates a single shared priority queue, protects it via ReentrantLock,
-     * and joins all virtual tasks before computing the final majority vote.
+     * and joins all worker threads before computing the final majority vote.
      */
     private String runParallel(String filePath, Neighbor target, int k, int numThreads) {
         List<ChunkBounds> chunks;
@@ -155,6 +155,16 @@ public class KNNLock {
         }
     }
 
+    /**
+     * @method computeChunks
+     * @brief Calculates balanced byte chunks across the file, ensuring line alignment.
+     * Dynamically seeks line breaks ('\n') to ensure that lines are not chopped mid-text
+     * when dividing the file among worker threads.
+     * @param filePath Path to the file.
+     * @param numChunks Desired number of partitions.
+     * @return A list containing the byte boundaries for each chunk.
+     * @throws IOException If file access errors occur.
+     */
     private List<ChunkBounds> computeChunks(String filePath, int numChunks) throws IOException {
         List<ChunkBounds> chunks = new ArrayList<>();
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
@@ -163,7 +173,7 @@ public class KNNLock {
 
             raf.seek(0);
             int b;
-            while ((b = raf.read()) != -1 && b != '\n') { /* pula header */ }
+            while ((b = raf.read()) != -1 && b != '\n') {}
 
             long dataStart = raf.getFilePointer();
             long dataSize = fileSize - dataStart;
@@ -177,7 +187,7 @@ public class KNNLock {
                 } else {
                     long rawEnd = dataStart + (long) (i + 1) * rawChunkSize;
                     raf.seek(rawEnd);
-                    while ((b = raf.read()) != -1 && b != '\n') { /* alinha */ }
+                    while ((b = raf.read()) != -1 && b != '\n') {}
                     chunkEnd = (b == -1) ? fileSize : raf.getFilePointer();
                 }
                 if (chunkStart < chunkEnd) {
@@ -190,6 +200,14 @@ public class KNNLock {
         return chunks;
     }
 
+    /**
+     * @method calculateEuclideanDistance
+     * @brief Computes the Euclidean distance between two Neighbor multidimensional vectors.
+     * Loops through numerical features sequentially to perform geometric distance calculation.
+     * @param target The reference entity.
+     * @param dataPoint The dataset record entity.
+     * @return Geometric Euclidean distance as a double value.
+     */
     private double calculateEuclideanDistance(Neighbor target, Neighbor dataPoint) {
         double sum = 0.0;
         ArrayList<Double> tv = target.getValues();
@@ -201,6 +219,14 @@ public class KNNLock {
         return Math.sqrt(sum);
     }
 
+    /**
+     * @method parseLineToNeighbor
+     * @brief Converts a comma-separated text line into a typed Neighbor domain model.
+     * Extracts numerical properties from previous columns and matches the final column
+     * to the category/classification label string.
+     * @param line Raw line string extracted from the text file.
+     * @return A validated Neighbor object instance or null if parsing fails.
+     */
     private Neighbor parseLineToNeighbor(String line) {
         String[] parts = line.split(",");
         if (parts.length < 2) return null;
@@ -214,6 +240,13 @@ public class KNNLock {
         }
     }
 
+    /**
+     * @method majorityVote
+     * @brief Resolves class labels by frequency count over the consolidated nearest neighbors.
+     * Iterates over elements inside the queue, maps occurrence scores, and determines the modes.
+     * @param topK Priority queue containing the global nearest dataset entries.
+     * @return String holding the winner classification label name.
+     */
     private String majorityVote(PriorityQueue<DistanceRecord> topK) {
         Map<String, Integer> freq = new HashMap<>();
         for (DistanceRecord r : topK)
