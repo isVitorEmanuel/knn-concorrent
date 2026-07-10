@@ -6,13 +6,13 @@ THREADS="${3:-20}"
 LOOPS="${4:-3}"
 
 case "${GC^^}" in
-  PARALLELGC|PARALLEL) GC_FLAG="-XX:+UseParallelGC";             GC_LABEL="ParallelGC" ;;
-  G1GC|G1)             GC_FLAG="-XX:+UseG1GC";                   GC_LABEL="G1GC"       ;;
-  ZGC|Z)               GC_FLAG="-XX:+UseZGC -XX:+ZGenerational"; GC_LABEL="ZGC"        ;;
+  PARALLELGC|PARALLEL) GC_FLAG="-XX:-UseG1GC -XX:+UseParallelGC";              GC_LABEL="ParallelGC"; GC_EXTRA="" ;;
+  G1GC|G1)             GC_FLAG="-XX:+UseG1GC";                                 GC_LABEL="G1GC";       GC_EXTRA="-XX:MaxGCPauseMillis=100 -XX:G1ReservePercent=20" ;;
+  ZGC|Z)               GC_FLAG="-XX:-UseG1GC -XX:+UseZGC -XX:+ZGenerational";  GC_LABEL="ZGC";        GC_EXTRA="" ;;
   *) echo "❌ GC inválido: ${GC}. Use: ParallelGC | G1GC | ZGC"; exit 1 ;;
 esac
 
-VERSOES_VALIDAS=("Serial" "Platform" "Virtual" "Hibrid" "Sync" "Lock" "Semaphore" "Barrier" "Atomic")
+VERSOES_VALIDAS=("Serial" "Platform" "Virtual" "Hibrid" "Sync" "Lock" "Semaphore" "Barrier" "Atomic" "ForkJoin" "StructuredConcurrency" "Executor" "CallableFuture" "ParallelStream" "CompletableFuture")
 VERSAO_VALIDA=false
 for V in "${VERSOES_VALIDAS[@]}"; do
   [[ "${V,,}" == "${VERSAO,,}" ]] && VERSAO_VALIDA=true && VERSAO="${V}" && break
@@ -29,6 +29,12 @@ case "${VERSAO}" in
   Semaphore) CLASSE="KNNSemaphore"; PACOTE="semaphore" ;;
   Barrier)   CLASSE="KNNBarrier";   PACOTE="barrier"   ;;
   Atomic)    CLASSE="KNNAtomic";    PACOTE="atomic"    ;;
+  ForkJoin)              CLASSE="KNNForkJoin";              PACOTE="executor" ;;
+  StructuredConcurrency) CLASSE="KNNStructuredConcurrency"; PACOTE="executor" ;;
+  Executor)              CLASSE="KNNExecutor";              PACOTE="executor" ;;
+  CallableFuture)        CLASSE="KNNCallableFuture";        PACOTE="executor" ;;
+  ParallelStream)        CLASSE="KNNParallelStream";        PACOTE="executor" ;;
+  CompletableFuture)     CLASSE="KNNCompletableFuture";     PACOTE="executor" ;;
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,17 +77,23 @@ import generator.DataSetGenerator
 import classes.Neighbor
 import java.util.ArrayList
 
-def k = 21
-def filePath = "${SCRIPT_DIR}/dataset_high_dim.csv"
-int numFeatures = DataSetGenerator.NUM_FEATURES
-def targetValues = new ArrayList<Double>()
-for (int i = 0; i < numFeatures; i++) { targetValues.add(500.0d) }
-def target = new Neighbor(targetValues, "Unknown")
+try {
+    def k = 21
+    def filePath = "${SCRIPT_DIR}/dataset_high_dim.csv"
+    int numFeatures = DataSetGenerator.NUM_FEATURES
+    def targetValues = new ArrayList<Double>()
+    for (int i = 0; i < numFeatures; i++) { targetValues.add(500.0d) }
+    def target = new Neighbor(targetValues, "Unknown")
 
-def knn = new ${CLASSE}()
-def result = knn.predictStream(filePath, target, k)
-SampleResult.setResponseData(result.toString(), "UTF-8")
-SampleResult.setSuccessful(true)
+    def knn = new ${CLASSE}()
+    def result = knn.predictStream(filePath, target, k)
+    SampleResult.setResponseData(result.toString(), "UTF-8")
+    SampleResult.setSuccessful(true)
+} catch (Throwable t) {
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseData("CORREÇÃO LOG - Erro na execução: " + t.toString(), "UTF-8")
+    log.error("Falha catastrófica no sampler Concorrente do Groovy", t)
+}
 GROOVY
 echo "   ✅ Groovy gerado"
 
@@ -151,14 +163,25 @@ echo "   Total   : $((THREADS * LOOPS)) execuções"
 echo "   JFR     : ${JFR_FILE}"
 echo ""
 
-export GC_ALGO="${GC_FLAG} -XX:MaxGCPauseMillis=100 -XX:G1ReservePercent=20"
-export JVM_ARGS="-XX:+FlightRecorder -XX:StartFlightRecording=filename=${JFR_FILE},dumponexit=true,settings=profile,name=knn-${VERSAO}"
+JFR_TMP_DIR="$(mktemp -d /tmp/knn_jfr.XXXXXX)"
+JFR_TMP_FILE="${JFR_TMP_DIR}/recording.jfr"
+
+export JVM_ARGS="${GC_FLAG} ${GC_EXTRA} --enable-preview -XX:+FlightRecorder -XX:StartFlightRecording=filename=${JFR_TMP_FILE},dumponexit=true,settings=profile,name=knn-${VERSAO}"
 export HEAP="-Xms512m -Xmx2g"
 
 jmeter -n \
   -t "${JMX_FILE}" \
   -l "${JMETER_RESULTS}" \
-  -e -o "${JMETER_REPORT}"
+  -e -o "${JMETER_REPORT}" \
+  -Jjmeter.save.saveservice.assertion_results_failure_message=true \
+  -Jjmeter.save.saveservice.data_type=true
+
+if [[ -f "${JFR_TMP_FILE}" ]]; then
+  mv "${JFR_TMP_FILE}" "${JFR_FILE}"
+  rmdir "${JFR_TMP_DIR}" 2>/dev/null || true
+else
+  echo "⚠️  Aviso: arquivo JFR temporário não encontrado em ${JFR_TMP_FILE}"
+fi
 
 echo ""
 echo "════════════════════════════════════════════"
@@ -169,13 +192,3 @@ echo "  GC         : ${GC_LABEL}"
 echo "  Threads    : ${THREADS}"
 echo "  Loops      : ${LOOPS} por thread"
 echo "  Total      : $((THREADS * LOOPS)) execuções"
-echo "  Resultados : ${RESULTS_DIR}/"
-echo "    ├── recording.jfr      → abrir no JMC"
-echo "    ├── knn_test.jmx"
-echo "    ├── knn_sampler.groovy"
-echo "    ├── jmeter_results.jtl"
-echo "    └── jmeter_report/index.html"
-echo "════════════════════════════════════════════"
-echo ""
-echo "💡 Abrir relatório: firefox ${JMETER_REPORT}/index.html"
-echo "💡 Abrir JFR: jmc &  →  File → Open File → ${JFR_FILE}"

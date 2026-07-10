@@ -1,0 +1,153 @@
+package spark;
+
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.sql.Column;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.api.java.UDF1;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+
+import java.util.Arrays;
+
+import static org.apache.spark.sql.functions.callUDF;
+import static org.apache.spark.sql.functions.col;
+import static org.apache.spark.sql.functions.desc;
+import static org.apache.spark.sql.functions.struct;
+
+/**
+ * @class KNNSparkJson
+ * @brief KNN variant in Spark that ingests the dataset in JSON format instead of CSV.
+ * Unlike Parquet/ORC, JSON (here, JSON Lines — one object per line, as
+ * {@code DataSetFormatConverter} writes it) does not store a binary schema in the file: by
+ * default, Spark would make a full pass over the data just to infer the types, exactly
+ * the same extra cost that {@code inferSchema=true} has for CSV.
+ * <p>
+ * That's why this class declares the schema explicitly (derived from {@code target.length},
+ * just like {@link KNNSparkFixedSchema}), avoiding that extra pass for JSON as well.
+ * <p>
+ * The rest of the pipeline (distance via UDF, orderBy+limit for the top-k, groupBy+count
+ * for majority voting) is intentionally identical to the other variants, in order to isolate
+ * the ingestion format/strategy as the sole variable of the experiment.
+ */
+public class KNNSparkJson {
+
+    private final SparkSession spark;
+    private final boolean ownsSession;
+
+    public KNNSparkJson() {
+        this(SparkSession.builder()
+                .appName("KNN-Spark-Json")
+                .master("local[*]")
+                .getOrCreate(), true);
+    }
+
+    public KNNSparkJson(SparkSession spark) {
+        this(spark, false);
+    }
+
+    private KNNSparkJson(SparkSession spark, boolean ownsSession) {
+        this.spark = spark;
+        this.ownsSession = ownsSession;
+    }
+
+    /**
+     * @method predict
+     * @brief Same as {@code KNNSpark.predict(String, double[], int)}, but reading the
+     * dataset from a JSON directory (JSON Lines), with an explicit schema
+     * built from {@code target.length}.
+     */
+    public String predict(String jsonPath, double[] target, int k) {
+        Dataset<Row> raw = loadDataset(jsonPath, target.length);
+        return predict(raw, target, k);
+    }
+
+    public String predict(Dataset<Row> raw, double[] target, int k) {
+        String[] columns = raw.columns();
+        if (columns.length < 2) {
+            System.err.println("Error: dataset must have at least one feature column and one label column.");
+            return "Unknown";
+        }
+
+        String labelCol = columns[columns.length - 1];
+        String[] featureCols = Arrays.copyOfRange(columns, 0, columns.length - 1);
+
+        if (target.length != featureCols.length) {
+            System.err.printf("Error: target dimension (%d) does not match dataset feature count (%d)%n",
+                    target.length, featureCols.length);
+            return "Unknown";
+        }
+
+        Broadcast<double[]> broadcastTarget =
+                JavaSparkContext.fromSparkContext(spark.sparkContext()).broadcast(target);
+
+        UDF1<Row, Double> euclideanDistance = (Row featureStruct) -> {
+            double[] t = broadcastTarget.value();
+            double sum = 0.0;
+            for (int i = 0; i < t.length; i++) {
+                Object raw0 = featureStruct.get(i);
+                double v = ((Number) raw0).doubleValue();
+                double diff = v - t[i];
+                sum += diff * diff;
+            }
+            return Math.sqrt(sum);
+        };
+        spark.udf().register("euclideanDistanceJson", euclideanDistance, DataTypes.DoubleType);
+
+        Column[] featureColumns = new Column[featureCols.length];
+        for (int i = 0; i < featureCols.length; i++) {
+            featureColumns[i] = col(featureCols[i]);
+        }
+
+        Dataset<Row> withDistance = raw.withColumn("distance",
+                callUDF("euclideanDistanceJson", struct(featureColumns)));
+
+        Dataset<Row> topK = withDistance.orderBy(col("distance").asc()).limit(k);
+
+        Row winner = topK.groupBy(col(labelCol).alias("label"))
+                .count()
+                .orderBy(desc("count"))
+                .first();
+
+        if (winner == null) {
+            System.err.println("Error: no valid neighbors found.");
+            return "Unknown";
+        }
+
+        Object labelValue = winner.get(0);
+        return labelValue == null ? "Unknown" : labelValue.toString();
+    }
+
+    /**
+     * @method loadDataset
+     * @brief Ingests the JSON directory with an explicit schema, avoiding the extra pass
+     * that Spark would otherwise make to infer the types of a JSON without a declared schema.
+     * @param jsonPath    Path to the JSON directory (generated by
+     *                    {@code DataSetFormatConverter}).
+     * @param numFeatures Number of feature columns (derived from {@code target.length}
+     *                    in {@link #predict(String, double[], int)}).
+     * @return The ingested DataFrame, already typed.
+     */
+    private Dataset<Row> loadDataset(String jsonPath, int numFeatures) {
+        StructField[] fields = new StructField[numFeatures + 1];
+        for (int i = 0; i < numFeatures; i++) {
+            fields[i] = DataTypes.createStructField("feature_" + (i + 1), DataTypes.DoubleType, true);
+        }
+        fields[numFeatures] = DataTypes.createStructField("label", DataTypes.StringType, true);
+        StructType schema = DataTypes.createStructType(fields);
+
+        return spark.read()
+                .format("json")
+                .schema(schema)
+                .load(jsonPath);
+    }
+
+    public void close() {
+        if (ownsSession) {
+            spark.stop();
+        }
+    }
+}

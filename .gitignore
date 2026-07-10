@@ -8,6 +8,10 @@ temp/
 
 .idea/
 
+graficos/
+
+dataset_high_dim.json
+
 dataset_high_dim.csv
 
 jmeter.log
